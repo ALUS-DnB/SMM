@@ -1,0 +1,35 @@
+# Project-wide settings
+PROJECT     := SocialMediaManager
+SRCS        := $(wildcard *.cpp)
+OBJS        := $(SRCS:.cpp=.o)
+CXXFLAGS    := -O2 -std=c++17 -I.
+
+# Platforms
+.PHONY: all linux windows mac clean
+
+all: linux windows mac
+
+# 1) Build on native Linux as a static binary
+linux: $(PROJECT)_linux
+
+$(PROJECT)_linux: $(OBJS)
+	$(CXX) $(CXXFLAGS) -static -o $@ $^ -lcurl -lsecret-1
+
+# 2) Cross-compile for Windows (x86_64) via MinGW-w64
+windows: $(PROJECT)_win.exe
+
+$(PROJECT)_win.exe: $(OBJS)
+	x86_64-w64-mingw32-g++ $(CXXFLAGS) -static -o $@ $^ -lcurl -luserenv
+
+# 3) Build for macOS with Clang (note static on macOS may require extra flags)
+mac: $(PROJECT)_mac
+
+$(PROJECT)_mac: $(OBJS)
+	clang++ $(CXXFLAGS) -static -mmacosx-version-min=10.9 -o $@ $^ -lcurl
+
+# Pattern rule for object files
+%.o: %.cpp
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -f $(OBJS) $(PROJECT)_linux $(PROJECT)_win.exe $(PROJECT)_mac
