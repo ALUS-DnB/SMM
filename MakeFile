@@ -2,7 +2,7 @@
 PROJECT     := SocialMediaManager
 SRCS        := $(wildcard *.cpp)
 OBJS        := $(SRCS:.cpp=.o)
-CXXFLAGS    := -O2 -std=c++17 -I.
+CXXFLAGS    := -O2 -std=c++17 -I. -Iinclude
 
 # Platforms
 .PHONY: all linux windows mac clean
