@@ -25,7 +25,10 @@ A cross-platform C++ application designed to create, schedule, and publish posts
 │   ├── credentialmanager.cpp
 │   ├── credentialmanager.h
 │   ├── errorhandler.cpp
-│   └── errorhandler.h
+│   ├── errorhandler.h
+│   └── include/
+│   	└── nlohmann/
+│   		└── json.hpp
 ├── Makefile
 ├── README.md
 └── LICENSE
