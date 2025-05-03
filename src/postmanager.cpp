@@ -1,6 +1,6 @@
 // postmanager.cpp
 #include "postmanager.h"
-#include "post_storage.h"
+#include "poststorage.h"
 
 #include <iostream>
 #include <limits>
