@@ -1,4 +1,6 @@
+// postmanager.cpp
 #include "postmanager.h"
+#include "post_storage.h"
 
 #include <iostream>
 #include <limits>
@@ -10,34 +12,26 @@
 namespace fs = std::filesystem;
 
 void PostManager::run() {
+    loadPosts();
     while (true) {
         handleScheduledPosts();
         showMenu();
 
-        int choice = getValidatedChoice(1, 8);  // Updated max option to 8
-        if (choice == -1) {
-            std::cout << "⚠️  Invalid input. Please try again.\n";
-            continue;  // Instead of breaking, let the user try again
-        }
+        int choice;
+        std::cin >> choice;
+        clearInputStream();
 
         switch (choice) {
-            case 1:
-            case 2:
-            case 3:
-            case 4:
-            case 5:
-            case 6:
-                handleChoice(choice);
-                break;
-            case 7:
-                std::cout << "👋 Goodbye!\n";
-                return;
-            case 8:
-                setupToken();
-                break;
+            case 1: createPost(); break;
+            case 2: viewPosts(); break;
+            case 3: editPostByIndex(); break;
+            case 4: postToSocialMedia(); break;
+            case 5: schedulePostMenu(); break;
+            case 6: savePosts(); break;
+            case 7: setupToken(); break;
+            case 8: std::cout << "👋 Goodbye!\n"; return;
+            default: std::cout << "Invalid input. Try again.\n"; break;
         }
-
-        std::cout << "\n🔁 Returning to main menu...\n";
         std::this_thread::sleep_for(std::chrono::milliseconds(500));
     }
 }
@@ -46,239 +40,164 @@ void PostManager::showMenu() const {
     std::cout << "\n=== Social Media Post Manager ===\n"
               << "1. Create a new post\n"
               << "2. View all posts\n"
-              << "3. View post by number\n"
-              << "4. Edit a post\n"
-              << "5. Post to social media platforms\n"
-              << "6. Schedule a post\n"
-              << "7. Exit\n"
-              << "8. Set up token\n"
+              << "3. Edit a post\n"
+              << "4. Post to selected platforms\n"
+              << "5. Schedule a post\n"
+              << "6. Save posts to disk\n"
+              << "7. Set up token\n"
+              << "8. Exit\n"
               << "Choose an option: ";
 }
 
 void PostManager::createPost() {
-    std::cout << "\nCreating a new post...\n";
-
     std::string message;
-    std::cout << "Enter the message (max " << MAX_CHAR_LIMIT << " characters): ";
-    std::getline(std::cin, message);
+    do {
+        std::cout << "Enter post message (max 280 chars): ";
+        std::getline(std::cin, message);
+        if (message.length() > 280) std::cout << "Message too long. Try again.\n";
+    } while (message.length() > 280);
 
-    if (message.length() > MAX_CHAR_LIMIT) {
-        ErrorHandler::logError("Message too long. Post creation failed.", "createPost");
-        return;
-    }
+    std::string media;
+    do {
+        std::cout << "Enter media file path (or leave blank): ";
+        std::getline(std::cin, media);
+        if (!media.empty() && !fs::exists(media)) std::cout << "File doesn't exist. Try again.\n";
+        else break;
+    } while (true);
 
-    std::string videoPath;
-    std::cout << "Enter media file path (or leave empty for no media): ";
-    std::getline(std::cin, videoPath);
+    Post newPost(message, media);
 
-    if (!videoPath.empty() && !fs::exists(videoPath)) {
-        ErrorHandler::logError("File does not exist. Post creation failed.", "createPost");
-        return;
-    }
-
-    // Create a new post with message and media
-    Post newPost(message, videoPath);
-
-    // Ask for tags and add them to the post
+    std::cout << "Enter tags (space-separated): ";
+    std::string tagLine;
+    std::getline(std::cin, tagLine);
+    std::istringstream ss(tagLine);
     std::string tag;
-    std::cout << "Enter tags (separate tags by spaces, or press Enter to finish): ";
-    std::getline(std::cin, tag);
-
-    if (!tag.empty()) {
-        std::istringstream tagStream(tag);
-        std::string individualTag;
-        while (tagStream >> individualTag) {
-            newPost.addTag(individualTag);  // Add each tag to the post
-        }
-    }
+    while (ss >> tag) newPost.addTag(tag);
 
     posts.push_back(newPost);
-    std::cout << "✅ New post created successfully!\n";
+    std::cout << "✅ Post created.\n";
 }
 
 void PostManager::viewPosts() const {
-    if (posts.empty()) {
-        std::cout << "No posts to display.\n";
-        return;
-    }
+    if (posts.empty()) return (void)std::cout << "No posts.\n";
 
-    std::cout << "\n📋 Your Posts:\n";
-    for (std::size_t i = 0; i < posts.size(); ++i) {
+    for (size_t i = 0; i < posts.size(); ++i) {
         const auto& post = posts[i];
-        std::cout << i + 1 << ". " << post.message;
-        if (!post.videoPath.empty()) {
-            std::cout << " [🎥 Attached: " << post.videoPath << "]";
-        }
-        if (post.scheduledTime > 0) {
-            std::cout << " [⏰ Scheduled: " << std::ctime(&post.scheduledTime) << "]";
-        }
-
-        // Display tags
+        std::cout << i+1 << ". " << post.message;
+        if (!post.videoPath.empty()) std::cout << " [Media: " << post.videoPath << "]";
+        if (post.scheduledTime) std::cout << " [Scheduled: " << std::ctime(&post.scheduledTime) << "]";
         std::cout << " Tags: ";
-        auto tags = post.getTags();
-        if (!tags.empty()) {
-            for (const auto& tag : tags) {
-                std::cout << "#" << tag << " ";
-            }
-        } else {
-            std::cout << "No tags.\n";
-        }
-
+        for (const auto& tag : post.getTags()) std::cout << "#" << tag << " ";
         std::cout << "\n";
     }
 }
 
 void PostManager::editPostByIndex() {
-    if (posts.empty()) {
-        ErrorHandler::logError("No posts available to edit.", "editPostByIndex");
-        return;
-    }
-
-    std::cout << "Enter post number to edit (1 to " << posts.size() << "): ";
-    std::size_t index;
+    if (posts.empty()) return (void)std::cout << "No posts to edit.\n";
+    std::cout << "Post number to edit: ";
+    int index;
     std::cin >> index;
+    clearInputStream();
+    if (index < 1 || static_cast<size_t>(index) > posts.size()) return (void)std::cout << "Invalid index.\n";
 
-    if (std::cin.fail() || index < 1 || index > posts.size()) {
-        ErrorHandler::logError("Invalid post number.", "editPostByIndex");
-        clearInputStream();
-        return;
-    }
+    Post& post = posts[index - 1];
+    std::string newMsg;
+    std::cout << "New message (blank = keep): ";
+    std::getline(std::cin, newMsg);
+    if (!newMsg.empty() && newMsg.length() <= 280) post.message = newMsg;
 
-    clearInputStream(); 
-    auto& post = posts[index - 1]; 
-
-    std::cout << "Editing Post #" << index << ":\n";
-    std::cout << "Current message: " << post.message << "\n";
-    std::cout << "Enter new message (max " << MAX_CHAR_LIMIT << " characters, or leave empty to keep): ";
-    std::string newMessage;
-    std::getline(std::cin, newMessage);
-
-    if (!newMessage.empty() && newMessage.length() <= MAX_CHAR_LIMIT) {
-        post.message = std::move(newMessage);
-    } else if (!newMessage.empty()) {
-        ErrorHandler::logError("Message too long. Edit failed.", "editPostByIndex");
-        return;
-    }
-
-    std::cout << "Current media file path: " << (post.videoPath.empty() ? "None" : post.videoPath) << "\n";
-    std::cout << "Enter new media file path (or leave empty to keep): ";
-    std::string newVideoPath;
-    std::getline(std::cin, newVideoPath);
-
-    if (!newVideoPath.empty() && !fs::exists(newVideoPath)) {
-        ErrorHandler::logError("File does not exist. Edit failed.", "editPostByIndex");
-        return;
-    }
-
-    if (!newVideoPath.empty()) {
-        post.videoPath = std::move(newVideoPath);
-    }
-
-    std::cout << "✅ Post edited successfully.\n";
+    std::string newMedia;
+    std::cout << "New media path (blank = keep): ";
+    std::getline(std::cin, newMedia);
+    if (!newMedia.empty() && fs::exists(newMedia)) post.videoPath = newMedia;
+    std::cout << "✅ Post updated.\n";
 }
 
 void PostManager::schedulePostMenu() {
-    if (posts.empty()) {
-        ErrorHandler::logError("No posts to schedule.", "schedulePostMenu");
-        return;
-    }
-
-    std::size_t index;
-    int delay;
-    while (true) {
-        std::cout << "Enter post number to schedule (1 to " << posts.size() << "): ";
-        std::cin >> index;
-
-        if (std::cin.fail() || index < 1 || index > posts.size()) {
-            ErrorHandler::logError("Invalid post number.", "schedulePostMenu");
-            clearInputStream();  // Clear the stream and prompt again
-            continue;
-        }
-
-        clearInputStream();
-
-        std::cout << "Enter delay in seconds: ";
-        std::cin >> delay;
-
-        if (std::cin.fail() || delay <= 0) {
-            ErrorHandler::logError("Invalid delay value.", "schedulePostMenu");
-            clearInputStream();  // Clear the stream and prompt again
-            continue;
-        }
-
-        schedulePost(posts[index - 1], delay);
-        break;  // Exit loop when valid input is received
-    }
-}
-
-void PostManager::logAction(const std::string& actionMessage) const {
-    std::cout << "Action Log: " << actionMessage << "\n";
-}
-
-void PostManager::logError(const std::string& errorMessage) const {
-    std::cout << "Error Log: " << errorMessage << "\n";
+    if (posts.empty()) return (void)std::cout << "No posts to schedule.\n";
+    int index, delay;
+    std::cout << "Post number to schedule: "; std::cin >> index;
+    clearInputStream();
+    if (index < 1 || static_cast<size_t>(index) > posts.size()) return;
+    std::cout << "Delay (seconds): "; std::cin >> delay;
+    clearInputStream();
+    if (delay <= 0) return;
+    schedulePost(posts[index - 1], delay);
 }
 
 void PostManager::schedulePost(Post& post, int delayInSeconds) {
     post.scheduledTime = std::time(nullptr) + delayInSeconds;
-    std::cout << "Post scheduled for: " << std::ctime(&post.scheduledTime) << "\n";
+    std::cout << "Post scheduled.\n";
 }
 
 void PostManager::handleScheduledPosts() {
-    std::time_t currentTime = std::time(nullptr);
+    std::time_t now = std::time(nullptr);
     for (auto& post : posts) {
-        if (post.scheduledTime != 0 && post.scheduledTime <= currentTime) {
-            std::cout << "Scheduled post is now going live!\n";
-            postToPlatform(post, "Generic Platform");
-            post.scheduledTime = 0;
+        if (post.scheduledTime && post.scheduledTime <= now) {
+            std::cout << "Posting scheduled post...\n";
+            auto platforms = getPlatformSelectionFromUser();
+            for (const auto& platform : platforms) postToPlatform(post, platform);
+            if (confirm("Delete this post after publishing? (y/n): ")) post = posts.back(), posts.pop_back();
+            else post.scheduledTime = 0;
         }
     }
 }
 
 void PostManager::postToPlatform(const Post& post, const std::string& platform) const {
     auto tokenOpt = credentialManager.getToken(platform);
-    if (!tokenOpt) {
-        ErrorHandler::logError("No token found for " + platform + ". Skipping.", "postToPlatform");
-        return;
-    }
-    std::string token = *tokenOpt;
-
-    SocialMediaCurl curl(token);
+    if (!tokenOpt) return ErrorHandler::logError("Missing token for " + platform, "postToPlatform");
+    SocialMediaCurl curl(*tokenOpt);
     bool success = false;
+    if (platform == "twitter") success = curl.postToTwitter(post.message, post.videoPath);
+    else if (platform == "facebook") success = curl.postToFacebook(post.message, post.videoPath);
+    else if (platform == "instagram") success = curl.postToInstagram(post.message, post.videoPath);
+    else if (platform == "tiktok") success = curl.postToTikTok(post.message, post.videoPath);
+    else if (platform == "youtube") success = curl.postToYouTube(post.message, post.videoPath);
 
-    if (platform == "twitter") {
-        success = curl.postToTwitter(post.message, post.videoPath);
-    } else if (platform == "facebook") {
-        success = curl.postToFacebook(post.message, post.videoPath);
-    } else if (platform == "instagram") {
-        success = curl.postToInstagram(post.message, post.videoPath);
-    } else if (platform == "tiktok") {
-        success = curl.postToTikTok(post.message, post.videoPath);
-    } else if (platform == "youtube") {
-        success = curl.postToYouTube(post.message, post.videoPath);
-    }
-
-    if (success) {
-        std::cout << "✅ Successfully posted to " << platform << "!\n";
-    } else {
-        ErrorHandler::logError("Failed to post to " + platform + ".", "postToPlatform");
-    }
+    std::cout << (success ? "✅ Posted to " + platform : "❌ Failed to post to " + platform) << "\n";
 }
 
 void PostManager::postToSocialMedia() {
-    if (posts.empty()) {
-        ErrorHandler::logError("No posts to send.", "postToSocialMedia");
-        return;
-    }
+    if (posts.empty()) return (void)std::cout << "No posts.\n";
+    auto platforms = getPlatformSelectionFromUser();
+    for (const auto& post : posts)
+        for (const auto& platform : platforms)
+            postToPlatform(post, platform);
+}
 
-    for (const auto& post : posts) {
-        std::cout << "\nPosting: " << post.message << "\n";
-        postToPlatform(post, "twitter");
-        postToPlatform(post, "facebook");
-        postToPlatform(post, "instagram");
-        postToPlatform(post, "tiktok");
-        postToPlatform(post, "youtube");
+void PostManager::savePosts() const {
+    PostStorage::save(posts);
+}
+
+void PostManager::loadPosts() {
+    posts = PostStorage::load();
+}
+
+std::vector<std::string> PostManager::getPlatformSelectionFromUser() const {
+    std::vector<std::string> selected;
+    std::cout << "Platforms: [1] Twitter [2] Facebook [3] Instagram [4] TikTok [5] YouTube\n";
+    std::cout << "Enter numbers separated by space (e.g., 1 3 5): ";
+    std::string input;
+    std::getline(std::cin, input);
+    std::istringstream ss(input);
+    int val;
+    while (ss >> val) {
+        switch (val) {
+            case 1: selected.push_back("twitter"); break;
+            case 2: selected.push_back("facebook"); break;
+            case 3: selected.push_back("instagram"); break;
+            case 4: selected.push_back("tiktok"); break;
+            case 5: selected.push_back("youtube"); break;
+        }
     }
+    return selected;
+}
+
+bool PostManager::confirm(const std::string& prompt) const {
+    std::string response;
+    std::cout << prompt;
+    std::getline(std::cin, response);
+    return response == "y" || response == "Y";
 }
 
 void PostManager::clearInputStream() const {
@@ -290,15 +209,8 @@ void PostManager::clearInputStream() const {
 
 void PostManager::setupToken() {
     std::string platform, token;
-    clearInputStream();
-    std::cout << "Enter platform name: ";
-    std::getline(std::cin, platform);
-    std::cout << "Enter token: ";
-    std::getline(std::cin, token);
-
-    if (credentialManager.storeToken(platform, token)) {
-        std::cout << "✅ Token stored successfully.\n";
-    } else {
-        ErrorHandler::logError("Failed to store token.", "setupToken");
-    }
+    std::cout << "Enter platform: "; std::getline(std::cin, platform);
+    std::cout << "Enter token: "; std::getline(std::cin, token);
+    if (credentialManager.storeToken(platform, token)) std::cout << "Token saved.\n";
+    else std::cout << "Failed to save token.\n";
 }
